@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 from collections import defaultdict
+from subprocess import Popen
 
 def parse_args(argv):
     parser = argparse.ArgumentParser()
@@ -40,7 +41,54 @@ def main(argv):
         get_all_files_in_dir(dirname, global_dict, options.extensions)
     dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(global_dict)
     write_to_output(options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+    if options.interactive_delete:
+        interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
 
+
+def interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
+    for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
+        for dirpath_with_files_in_common, common_files_count in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: x[1]):
+            skip = not ask_yesno(
+                "%s and %s have %s files in common. View them?" %
+                (dirpath, dirpath_with_files_in_common, common_files_count),
+                default_yes=True,
+            )
+            if skip:
+                continue
+            try:
+                Popen('explorer %s' % dirpath)
+                Popen('explorer %s' % dirpath_with_files_in_common)
+            except Exception as e:
+                print("Error:", e)
+                print("Skipping...")
+                continue
+            remove = ask_yesno("Remove files from one of the folders?", default_yes=False)
+            if not remove:
+                continue
+            print("Which folder? [0/1/Abort]")
+            print("0: %s\n1: %s" % (dirpath, dirpath_with_files_in_common))
+            folder = raw_input()
+            if folder not in ('0', '1'):
+                # abort
+                print("Skipping")
+                continue
+            print ("Here we would remove stuff")
+
+
+def ask_yesno(msg, default_yes=False):
+    """
+        asks the user yes/no, returns True for yes, False for no
+    """
+    res = None
+    while res not in ('y', 'n'):
+        sys.stdout.write("\n%s [%s/%s] " % (msg, 'Y' if default_yes else 'y', 'n' if default_yes else 'N'))
+        res = raw_input().lower()
+        if res == 'yes':
+            res = 'y'
+        elif res == 'no':
+            res = 'n'
+    sys.stdout.write("\n")
+    return res == 'y'
 
 
 def analyse_gathered_files_info(global_dict):
