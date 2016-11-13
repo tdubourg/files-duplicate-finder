@@ -46,8 +46,12 @@ def main(argv):
 
 
 def interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
+    # Only importing here so that the rest of the features can be used without this module, which requires extra
+    # installation and is also only made for Windows.
+    from send2trash import send2trash
     for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
-        for dirpath_with_files_in_common, common_files_count in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: x[1]):
+        for dirpath_with_files_in_common, common_files in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: len(x[1])):
+            common_files_count = len(common_files)
             skip = not ask_yesno(
                 "%s and %s have %s files in common. View them?" %
                 (dirpath, dirpath_with_files_in_common, common_files_count),
@@ -72,7 +76,13 @@ def interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpath
                 # abort
                 print("Skipping")
                 continue
-            print ("Here we would remove stuff")
+            for filename in common_files:
+                filepath = os.path.join(dirpath if folder == '0' else dirpath_with_files_in_common, filename)
+                try:
+                    send2trash(filepath)
+                    print ("Deleted %s" % filepath)
+                except Exception as e:
+                    print("Error while trying to delete %s: %s" % (filepath, e))
 
 
 def ask_yesno(msg, default_yes=False):
@@ -93,7 +103,7 @@ def ask_yesno(msg, default_yes=False):
 
 def analyse_gathered_files_info(global_dict):
     dirpaths_with_dupes_counts = defaultdict(lambda: 0)
-    dirpaths_to_paths_with_common_files = defaultdict(lambda: defaultdict(lambda: 0))
+    dirpaths_to_paths_with_common_files = defaultdict(lambda: defaultdict(lambda: []))
     filtered_files_dupes = {}
     for file, paths in global_dict.iteritems():
         if len(paths) > 1:  # only write files that actually have duplicates...
@@ -103,7 +113,7 @@ def analyse_gathered_files_info(global_dict):
                 for dirpath2 in paths:
                     if dirpath == dirpath2:
                         continue
-                    dirpaths_to_paths_with_common_files[dirpath][dirpath2] += 1
+                    dirpaths_to_paths_with_common_files[dirpath][dirpath2].append(file)
                 filtered_files_dupes[file].append(dirpath)
     return dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes
 
@@ -121,8 +131,8 @@ def write_to_output(outpath, filtered_files_dupes, dirpaths_with_dupes_counts, d
         fout.write("\n")
         for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
             fout.write("%s\t%s\n" % (dirpath, count))
-            for dirpath_with_files_in_common, common_files_count in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: x[1]):
-                fout.write("\t%s\t%s\n" % (dirpath_with_files_in_common, common_files_count))
+            for dirpath_with_files_in_common, common_files in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: len(x[1])):
+                fout.write("\t%s\t%s\n" % (dirpath_with_files_in_common, len(common_files)))
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
