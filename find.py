@@ -92,10 +92,17 @@ def main(argv):
 
 def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
     deletion_threads = []
+    pairs_of_folders_passed = set()
     try:
         for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
             for dirpath_with_files_in_common, common_files in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: len(x[1])):
+                curr_folders_tuple = (dirpath, dirpath_with_files_in_common)
+                inverse_folders_tuple = (curr_folders_tuple[1], curr_folders_tuple[0])
+                if inverse_folders_tuple in pairs_of_folders_passed:
+                    print("%s and %s already passed, skipping..." % curr_folders_tuple)
+                    continue
                 common_files_count = len(common_files)
+                pairs_of_folders_passed.add(curr_folders_tuple)
                 skip = not ask_yesno(
                     "%s and %s have %s files in common. View them?" %
                     (dirpath, dirpath_with_files_in_common, common_files_count),
