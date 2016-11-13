@@ -32,8 +32,8 @@ class DeleteThread(Thread):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--folders', type=str, help='folders to find duplicates in', nargs='+')
-    parser.add_argument('--exclude-folders', type=str, help='folders to ignore', nargs='+')
+    parser.add_argument('--folders', type=str, help='folders to find duplicates in', nargs='+', required=True)
+    parser.add_argument('--exclude-folders', type=str, help='folders to ignore', nargs='+', default=[])
     parser.add_argument('--extensions', type=str, default=[], help='if specified, will restrict the analysis to files ending with this extension (WITHOUT THE DOT) (NOT case-sensitive)', nargs='+')
     parser.add_argument('--output-path', '-o', type=str, help='path to write output to')
     parser.add_argument('--deletion-log-path', type=str, help='path to write deletion output log to', default='deletion_log.log')
@@ -60,15 +60,19 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
         for file in files:
             if extension_filters is not None:
                 ext_pos = file.rfind('.')
-                ext = file[ext_pos + 1:]
+                ext = file[ext_pos + 1:].lower()
                 if ext not in extension_filters:
                     # Extension filters were specified and the file does not
                     # respect the filters, skipping it
                     continue
             if options.check_size:
-                statinfo = os.stat(os.path.join(root, file))
-                size = statinfo.st_size
-                global_dict[file.lower()][size].append(root.lower())
+                try:
+                    fpath = os.path.join(root, file)
+                    statinfo = os.stat(fpath)
+                    size = statinfo.st_size
+                    global_dict[file.lower()][size].append(root.lower())
+                except Exception as e:
+                    print("Could not gather information about %s (%s), skipping." % (fpath, e))
             else:
                 global_dict[file.lower()].append(root.lower())
 
@@ -81,12 +85,20 @@ def main(argv):
         if options.check_size:
             global_dict = defaultdict(lambda: defaultdict(lambda: list()))
         for dirname in options.folders:
+            print("Reading content of target folder \"%s\"..." % dirname)
             get_all_files_in_dir(options, dirname, global_dict, options.extensions)
+            print("Done")
+        print("Executing analysis...")
         dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(options, global_dict)
+        print("Done")
+        print("Saving to output file...")
         write_to_output(options, options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+        print("Done")
         if options.interactive_delete:
+            print("Starting interactive delete.")
             interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
     except BaseException as e:
+        print("Unexpected error happened.")
         print(e)
 
     print("Press enter to exit the program.")
