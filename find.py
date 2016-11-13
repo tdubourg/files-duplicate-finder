@@ -8,6 +8,7 @@ def parse_args(argv):
     parser.add_argument('--folders', type=str, help='folders to find duplicates in', nargs='+')
     parser.add_argument('--extensions', type=str, default=[], help='if specified, will restrict the analysis to files ending with this extension (WITHOUT THE DOT) (NOT case-sensitive)', nargs='+')
     parser.add_argument('--output-path', '-o', type=str, help='path to write output to')
+    parser.add_argument('--interactive-delete', action='store_true', default=False)
 
     return parser.parse_args(argv)
 
@@ -37,28 +38,36 @@ def main(argv):
     global_dict = defaultdict(lambda: list())
     for dirname in options.folders:
         get_all_files_in_dir(dirname, global_dict, options.extensions)
-    write_to_output(options.output_path, global_dict)
-    # print(global_dict.items())
+    dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(global_dict)
+    write_to_output(options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
 
 
-def write_to_output(outpath, global_dict):
+
+def analyse_gathered_files_info(global_dict):
+    dirpaths_with_dupes_counts = defaultdict(lambda: 0)
+    dirpaths_to_paths_with_common_files = defaultdict(lambda: defaultdict(lambda: 0))
+    filtered_files_dupes = {}
+    for file, paths in global_dict.iteritems():
+        if len(paths) > 1:  # only write files that actually have duplicates...
+            filtered_files_dupes[file] = []
+            for dirpath in paths:
+                dirpaths_with_dupes_counts[dirpath] += 1
+                for dirpath2 in paths:
+                    if dirpath == dirpath2:
+                        continue
+                    dirpaths_to_paths_with_common_files[dirpath][dirpath2] += 1
+                filtered_files_dupes[file].append(dirpath)
+    return dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes
+
+
+def write_to_output(outpath, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
     if not outpath:
         outpath = "./file_duplicates.txt"
  
-    dirpaths_with_dupes_counts = defaultdict(lambda: 0)
-    dirpaths_to_paths_with_common_files = defaultdict(lambda: defaultdict(lambda: 0))
     with open(outpath, "w+", buffering=int(50e3)) as fout:
-        for file, paths in global_dict.iteritems():
-            if len(paths) > 1:  # only write files that actually have duplicates...
-                line = file
-                for dirpath in paths:
-                    dirpaths_with_dupes_counts[dirpath] += 1
-                    for dirpath2 in paths:
-                        if dirpath == dirpath2:
-                            continue
-                        dirpaths_to_paths_with_common_files[dirpath][dirpath2] += 1
-                    line += "\t%s" % dirpath
-                fout.write(line + "\n")
+        for file, dirpaths in filtered_files_dupes.items():
+            line = "%s\t%s\n" % (file, "\t".join(dirpaths))
+            fout.write(line)
         # Duplicates summary per folder:
         fout.write("#" * 200)
         fout.write("\n")
