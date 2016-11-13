@@ -3,12 +3,37 @@ import os
 import argparse
 from collections import defaultdict
 from subprocess import Popen
+from threading import Thread
+from datetime import datetime
+
+class DeleteThread(Thread):
+    """background deletion thread"""
+    def __init__(self, files_list, deletion_log_path):
+        super(DeleteThread, self).__init__()
+        self.files_list = files_list
+        self.deletion_log_path = deletion_log_path
+
+    def run(self):
+        # Only importing here so that the rest of the features can be used
+        # without this module, which requires extra installation and is also
+        # only made for Windows.
+        from send2trash import send2trash
+        with open(self.deletion_log_path, 'a+') as deletion_log_file:
+            for filepath in self.files_list:
+                try:
+                    send2trash(filepath)
+                    deletion_log_file.write("%s: Deleted %s\n" % (datetime.now(), filepath))
+                except Exception as e:
+                    deletion_log_file.write("%s: Error while trying to delete %s: %s\n" % (datetime.now(), filepath, e))
+
 
 def parse_args(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--folders', type=str, help='folders to find duplicates in', nargs='+')
+    parser.add_argument('--exclude-folders', type=str, help='folders to ignore', nargs='+')
     parser.add_argument('--extensions', type=str, default=[], help='if specified, will restrict the analysis to files ending with this extension (WITHOUT THE DOT) (NOT case-sensitive)', nargs='+')
     parser.add_argument('--output-path', '-o', type=str, help='path to write output to')
+    parser.add_argument('--deletion-log-path', type=str, help='path to write deletion output log to', default='deletion_log.log')
     parser.add_argument('--interactive-delete', action='store_true', default=False)
     parser.add_argument('--check-size', action='store_true', default=False)
 
@@ -22,6 +47,13 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
         extension_filters = set([e.lower() for e in extension_filters])
 
     for root, dirs, files in os.walk(dirname):
+        skip = False
+        for exclude_folder in options.exclude_folders:
+            if root.startswith(exclude_folder):
+                skip = True
+                break
+        if skip:
+            continue
         for file in files:
             if extension_filters is not None:
                 ext_pos = file.rfind('.')
@@ -36,61 +68,71 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
                 global_dict[file.lower()][size].append(root.lower())
             else:
                 global_dict[file.lower()].append(root.lower())
-            # fpath = os.path.join(root, file)
-            # fpaths.append(fpath)
 
 
 def main(argv):
     options = parse_args(argv)
-    global_dict = defaultdict(lambda: list())
-    if options.check_size:
-        global_dict = defaultdict(lambda: defaultdict(lambda: list()))
-    for dirname in options.folders:
-        get_all_files_in_dir(options, dirname, global_dict, options.extensions)
-    dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(options, global_dict)
-    write_to_output(options, options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
-    if options.interactive_delete:
-        interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+    print(options)
+    try:
+        global_dict = defaultdict(lambda: list())
+        if options.check_size:
+            global_dict = defaultdict(lambda: defaultdict(lambda: list()))
+        for dirname in options.folders:
+            get_all_files_in_dir(options, dirname, global_dict, options.extensions)
+        dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(options, global_dict)
+        write_to_output(options, options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+        if options.interactive_delete:
+            interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+    except BaseException as e:
+        print(e)
+
+    print("Press enter to exit the program.")
+    raw_input()
 
 
-def interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
-    # Only importing here so that the rest of the features can be used without this module, which requires extra
-    # installation and is also only made for Windows.
-    from send2trash import send2trash
-    for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
-        for dirpath_with_files_in_common, common_files in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: len(x[1])):
-            common_files_count = len(common_files)
-            skip = not ask_yesno(
-                "%s and %s have %s files in common. View them?" %
-                (dirpath, dirpath_with_files_in_common, common_files_count),
-                default_yes=True,
-            )
-            if skip:
-                continue
-            try:
-                Popen('explorer %s' % dirpath)
-                Popen('explorer %s' % dirpath_with_files_in_common)
-            except Exception as e:
-                print("Error:", e)
-                print("Skipping...")
-                continue
-            remove = ask_yesno("Remove files from one of the folders?", default_yes=False)
-            if not remove:
-                continue
-            print("Which folder? [0/1/Abort]")
-            print("0: %s\n1: %s" % (dirpath, dirpath_with_files_in_common))
-            folder = raw_input()
-            if folder not in ('0', '1'):
-                # abort
-                print("Skipping")
-                continue
-            for filename in common_files:
-                filepath = os.path.join(dirpath if folder == '0' else dirpath_with_files_in_common, filename)
+def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
+    deletion_threads = []
+    try:
+        for dirpath, count in sorted(dirpaths_with_dupes_counts.items(), reverse=True, key=lambda x: x[1]):
+            for dirpath_with_files_in_common, common_files in sorted(dirpaths_to_paths_with_common_files[dirpath].items(), reverse=True, key=lambda x: len(x[1])):
+                common_files_count = len(common_files)
+                skip = not ask_yesno(
+                    "%s and %s have %s files in common. View them?" %
+                    (dirpath, dirpath_with_files_in_common, common_files_count),
+                    default_yes=True,
+                )
+                if skip:
+                    continue
                 try:
-                    send2trash(filepath)
-                    print ("Deleted %s" % filepath)
+                    Popen('explorer %s' % dirpath)
+                    Popen('explorer %s' % dirpath_with_files_in_common)
                 except Exception as e:
-                    print("Error while trying to delete %s: %s" % (filepath, e))
+                    print("Error:", e)
+                    print("Skipping...")
+                    continue
+                remove = ask_yesno("Remove files from one of the folders?", default_yes=False)
+                if not remove:
+                    continue
+                print("Which folder? [0/1/Abort]")
+                print("0: %s\n1: %s" % (dirpath, dirpath_with_files_in_common))
+                folder = raw_input()
+                if folder not in ('0', '1'):
+                    # abort
+                    print("Skipping")
+                    continue
+                files_deletion_list = [os.path.join(dirpath if folder == '0' else dirpath_with_files_in_common, filename) for filename in common_files]
+                del_thread = DeleteThread(files_deletion_list, options.deletion_log_path)
+                deletion_threads.append(del_thread)
+                del_thread.start()
+                print("Deleting %s files in background..." % len(files_deletion_list))
+    except BaseException:
+        raise
+    finally:
+        print("Waiting for background deletion threads to finish...")
+        for del_thread in deletion_threads:
+            del_thread.join(600)
+        print("Done")
+
 
 
 def ask_yesno(msg, default_yes=False):
