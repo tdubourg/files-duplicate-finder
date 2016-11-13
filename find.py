@@ -5,6 +5,9 @@ from collections import defaultdict
 from subprocess import Popen
 from threading import Thread
 from datetime import datetime
+from time import sleep
+
+THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST = 50
 
 class DeleteThread(Thread):
     """background deletion thread"""
@@ -103,20 +106,35 @@ def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts
                     continue
                 common_files_count = len(common_files)
                 pairs_of_folders_passed.add(curr_folders_tuple)
-                skip = not ask_yesno(
-                    "%s and %s have %s files in common. View them?" %
-                    (dirpath, dirpath_with_files_in_common, common_files_count),
-                    default_yes=True,
+                files_list_disp = ""
+                common_files_for_display = common_files[:THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST]
+                files_list_disp = "\n%s\n" % "\n".join([
+                    "%s\t(0: %.3fmb\t%s\t1: %.3fmb\t%s)" % (
+                        _fname,
+                        os.stat(os.path.join(dirpath, _fname)).st_size/1e6,
+                        datetime.fromtimestamp(os.stat(os.path.join(dirpath, _fname)).st_ctime),
+                        os.stat(os.path.join(dirpath_with_files_in_common, _fname)).st_size/1e6,
+                        datetime.fromtimestamp(os.stat(os.path.join(dirpath_with_files_in_common, _fname)).st_ctime),
+                    )
+                    for _fname in common_files_for_display
+                ])
+                if len(common_files) > THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST:
+                    files_list_disp += "... [+ %s more files]\n" % (len(common_files) - THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST)
+                open_explorer = ask_yesno(
+                    "0: %s and 1: %s have %s files in common. %s View them in explorer?" %
+                    (dirpath, dirpath_with_files_in_common, common_files_count, files_list_disp),
+                    default_yes=False,
                 )
-                if skip:
-                    continue
-                try:
-                    Popen('explorer %s' % dirpath)
-                    Popen('explorer %s' % dirpath_with_files_in_common)
-                except Exception as e:
-                    print("Error:", e)
-                    print("Skipping...")
-                    continue
+                if open_explorer:
+                    try:
+                        Popen('explorer %s' % dirpath)
+                        # Delaying the second window by a second so that it does not go to background
+                        sleep(1)
+                        Popen('explorer %s' % dirpath_with_files_in_common)
+                    except Exception as e:
+                        print("Error:", e)
+                        print("Skipping...")
+                        continue
                 remove = ask_yesno("Remove files from one of the folders?", default_yes=False)
                 if not remove:
                     continue
@@ -154,6 +172,8 @@ def ask_yesno(msg, default_yes=False):
             res = 'y'
         elif res == 'no':
             res = 'n'
+        elif res == '':
+            res = 'y' if default_yes else 'n'
     sys.stdout.write("\n")
     return res == 'y'
 
