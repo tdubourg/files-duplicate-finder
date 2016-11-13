@@ -10,11 +10,12 @@ def parse_args(argv):
     parser.add_argument('--extensions', type=str, default=[], help='if specified, will restrict the analysis to files ending with this extension (WITHOUT THE DOT) (NOT case-sensitive)', nargs='+')
     parser.add_argument('--output-path', '-o', type=str, help='path to write output to')
     parser.add_argument('--interactive-delete', action='store_true', default=False)
+    parser.add_argument('--check-size', action='store_true', default=False)
 
     return parser.parse_args(argv)
 
 
-def get_all_files_in_dir(dirname, global_dict, extension_filters):
+def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
     if not extension_filters:
         extension_filters = None
     else:
@@ -29,7 +30,12 @@ def get_all_files_in_dir(dirname, global_dict, extension_filters):
                     # Extension filters were specified and the file does not
                     # respect the filters, skipping it
                     continue
-            global_dict[file.lower()].append(root.lower())
+            if options.check_size:
+                statinfo = os.stat(os.path.join(root, file))
+                size = statinfo.st_size
+                global_dict[file.lower()][size].append(root.lower())
+            else:
+                global_dict[file.lower()].append(root.lower())
             # fpath = os.path.join(root, file)
             # fpaths.append(fpath)
 
@@ -37,10 +43,12 @@ def get_all_files_in_dir(dirname, global_dict, extension_filters):
 def main(argv):
     options = parse_args(argv)
     global_dict = defaultdict(lambda: list())
+    if options.check_size:
+        global_dict = defaultdict(lambda: defaultdict(lambda: list()))
     for dirname in options.folders:
-        get_all_files_in_dir(dirname, global_dict, options.extensions)
-    dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(global_dict)
-    write_to_output(options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
+        get_all_files_in_dir(options, dirname, global_dict, options.extensions)
+    dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes = analyse_gathered_files_info(options, global_dict)
+    write_to_output(options, options.output_path, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
     if options.interactive_delete:
         interactive_delete(filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files)
 
@@ -101,31 +109,49 @@ def ask_yesno(msg, default_yes=False):
     return res == 'y'
 
 
-def analyse_gathered_files_info(global_dict):
+def analyse_gathered_files_info(options, global_dict):
     dirpaths_with_dupes_counts = defaultdict(lambda: 0)
     dirpaths_to_paths_with_common_files = defaultdict(lambda: defaultdict(lambda: []))
-    filtered_files_dupes = {}
+    filtered_files_dupes = defaultdict(lambda: defaultdict(lambda: []))
     for file, paths in global_dict.iteritems():
-        if len(paths) > 1:  # only write files that actually have duplicates...
-            filtered_files_dupes[file] = []
-            for dirpath in paths:
-                dirpaths_with_dupes_counts[dirpath] += 1
-                for dirpath2 in paths:
-                    if dirpath == dirpath2:
-                        continue
-                    dirpaths_to_paths_with_common_files[dirpath][dirpath2].append(file)
-                filtered_files_dupes[file].append(dirpath)
+        if options.check_size:
+            size_to_dirpaths = paths
+            for size, paths in size_to_dirpaths.items():            
+                if len(paths) > 1:  # only write files that actually have duplicates...
+                    for dirpath in paths:
+                        dirpaths_with_dupes_counts[dirpath] += 1
+                        for dirpath2 in paths:
+                            if dirpath == dirpath2:
+                                continue
+                            dirpaths_to_paths_with_common_files[dirpath][dirpath2].append(file)
+                        filtered_files_dupes[file][size].append(dirpath)
+        else:
+            if len(paths) > 1:  # only write files that actually have duplicates...
+                filtered_files_dupes[file] = []
+                for dirpath in paths:
+                    dirpaths_with_dupes_counts[dirpath] += 1
+                    for dirpath2 in paths:
+                        if dirpath == dirpath2:
+                            continue
+                        dirpaths_to_paths_with_common_files[dirpath][dirpath2].append(file)
+                    filtered_files_dupes[file].append(dirpath)
     return dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files, filtered_files_dupes
 
 
-def write_to_output(outpath, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
+def write_to_output(options, outpath, filtered_files_dupes, dirpaths_with_dupes_counts, dirpaths_to_paths_with_common_files):
     if not outpath:
         outpath = "./file_duplicates.txt"
  
     with open(outpath, "w+", buffering=int(50e3)) as fout:
-        for file, dirpaths in filtered_files_dupes.items():
-            line = "%s\t%s\n" % (file, "\t".join(dirpaths))
-            fout.write(line)
+        if not options.check_size:
+            for file, dirpaths in filtered_files_dupes.items():
+                line = "%s\t%s\n" % (file, "\t".join(dirpaths))
+                fout.write(line)
+        else:
+            for file, size_to_dirpaths in filtered_files_dupes.items():
+                for size, dirpaths in size_to_dirpaths.items():
+                    line = "%s\t%s\t%s\n" % (file, size, "\t".join(dirpaths))
+                    fout.write(line)
         # Duplicates summary per folder:
         fout.write("#" * 200)
         fout.write("\n")
