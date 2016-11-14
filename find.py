@@ -7,7 +7,7 @@ from threading import Thread
 from datetime import datetime
 from time import sleep
 
-THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST = 50
+FILE_LIST_DISPLAY_MAX_SIZE = 50
 
 class DeleteThread(Thread):
     """background deletion thread"""
@@ -133,7 +133,7 @@ def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts
                 common_files_count = len(common_files)
                 pairs_of_folders_passed.add(curr_folders_tuple)
                 files_list_disp = ""
-                common_files_for_display = common_files[:THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST]
+                common_files_for_display = common_files[:FILE_LIST_DISPLAY_MAX_SIZE]
 
                 filesinfo = []
                 for _fname in common_files_for_display:
@@ -162,8 +162,8 @@ def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts
                     ))
 
                 files_list_disp = "\n%s\n" % "\n".join(filesinfo)
-                if len(common_files) > THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST:
-                    files_list_disp += "... [+ %s more files]\n" % (len(common_files) - THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST)
+                if len(common_files) > FILE_LIST_DISPLAY_MAX_SIZE:
+                    files_list_disp += "... [+ %s more files]\n" % (len(common_files) - FILE_LIST_DISPLAY_MAX_SIZE)
                 open_explorer = ask_yesno(
                     "0: %s\n1: %s\nhave %s files in common. %s View them in explorer?" %
                     (dirpath, dirpath_with_files_in_common, common_files_count, files_list_disp),
