@@ -120,20 +120,38 @@ def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts
                 pairs_of_folders_passed.add(curr_folders_tuple)
                 files_list_disp = ""
                 common_files_for_display = common_files[:THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST]
-                files_list_disp = "\n%s\n" % "\n".join([
-                    "%s\t(0: %.3fmb\t%s\t1: %.3fmb\t%s)" % (
+
+                filesinfo = []
+                for _fname in common_files_for_display:
+                    try:
+                        fdir1_stat = os.stat(os.path.join(dirpath, _fname))
+                        fdir1_size = fdir1_stat.st_size/1e6
+                        fdir1_ctime = datetime.fromtimestamp(fdir1_stat.st_ctime)
+                    except Exception as e:
+                        fdir1_size = 0                        
+                        fdir1_ctime = "ERROR reading file"                        
+
+                    try:
+                        fdir2_stat = os.stat(os.path.join(dirpath_with_files_in_common, _fname))
+                        fdir2_size = fdir2_stat.st_size/1e6
+                        fdir2_ctime = datetime.fromtimestamp(fdir2_stat.st_ctime)
+                    except Exception as e:
+                        fdir2_size = 0                        
+                        fdir2_ctime = "ERROR reading file"
+
+                    filesinfo.append("%s\t(0: %.3fmb\t%s\t1: %.3fmb\t%s)" % (
                         _fname,
-                        os.stat(os.path.join(dirpath, _fname)).st_size/1e6,
-                        datetime.fromtimestamp(os.stat(os.path.join(dirpath, _fname)).st_ctime),
-                        os.stat(os.path.join(dirpath_with_files_in_common, _fname)).st_size/1e6,
-                        datetime.fromtimestamp(os.stat(os.path.join(dirpath_with_files_in_common, _fname)).st_ctime),
-                    )
-                    for _fname in common_files_for_display
-                ])
+                        fdir1_size,
+                        fdir1_ctime,
+                        fdir2_size,
+                        fdir2_ctime,
+                    ))
+
+                files_list_disp = "\n%s\n" % "\n".join(filesinfo)
                 if len(common_files) > THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST:
                     files_list_disp += "... [+ %s more files]\n" % (len(common_files) - THRESHOLD_TO_DISPLAY_DUPE_FILE_LIST)
                 open_explorer = ask_yesno(
-                    "0: %s and 1: %s have %s files in common. %s View them in explorer?" %
+                    "0: %s\n1: %s\nhave %s files in common. %s View them in explorer?" %
                     (dirpath, dirpath_with_files_in_common, common_files_count, files_list_disp),
                     default_yes=False,
                 )
@@ -141,7 +159,7 @@ def interactive_delete(options, filtered_files_dupes, dirpaths_with_dupes_counts
                     try:
                         Popen('explorer %s' % dirpath)
                         # Delaying the second window by a second so that it does not go to background
-                        sleep(1)
+                        sleep(1.5)
                         Popen('explorer %s' % dirpath_with_files_in_common)
                     except Exception as e:
                         print("Error:", e)
