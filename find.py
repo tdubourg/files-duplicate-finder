@@ -34,11 +34,14 @@ def parse_args(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--folders', type=str, help='folders to find duplicates in', nargs='+', required=True)
     parser.add_argument('--exclude-folders', type=str, help='folders to ignore', nargs='+', default=[])
+    parser.add_argument('--exclude-filenames', type=str, help='file names (not paths) to ignore (NOT case-sensitive)', nargs='+', default=[])
+    parser.add_argument('--exclude-folder-names', type=str, help='folder names (not paths) to ignore (NOT case-sensitive)', nargs='+', default=[])
     parser.add_argument('--extensions', type=str, default=[], help='if specified, will restrict the analysis to files ending with this extension (WITHOUT THE DOT) (NOT case-sensitive)', nargs='+')
     parser.add_argument('--output-path', '-o', type=str, help='path to write output to')
     parser.add_argument('--deletion-log-path', type=str, help='path to write deletion output log to', default='deletion_log.log')
     parser.add_argument('--interactive-delete', action='store_true', default=False)
     parser.add_argument('--check-size', action='store_true', default=False)
+    parser.add_argument('--minimum-size', type=int, default=0, help='Minimum size (in bytes) for a file to be analyzed. Files smaller than this size will be ignored.')
 
     return parser.parse_args(argv)
 
@@ -51,6 +54,9 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
 
     for root, dirs, files in os.walk(dirname):
         skip = False
+        folder_name = os.path.basename(os.path.normpath(root))
+        if folder_name.lower() in options.exclude_folder_names:
+            continue
         for exclude_folder in options.exclude_folders:
             if root.startswith(exclude_folder):
                 skip = True
@@ -58,6 +64,8 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
         if skip:
             continue
         for file in files:
+            if file.lower() in options.exclude_filenames:
+                continue
             if extension_filters is not None:
                 ext_pos = file.rfind('.')
                 ext = file[ext_pos + 1:].lower()
@@ -65,14 +73,20 @@ def get_all_files_in_dir(options, dirname, global_dict, extension_filters):
                     # Extension filters were specified and the file does not
                     # respect the filters, skipping it
                     continue
-            if options.check_size:
+
+            if options.check_size or options.minimum_size > 0:
                 try:
                     fpath = os.path.join(root, file)
                     statinfo = os.stat(fpath)
                     size = statinfo.st_size
-                    global_dict[file.lower()][size].append(root.lower())
+                    if size < options.minimum_size:  # note: default option value is zero
+                        continue  # skip this file
                 except Exception as e:
                     print("Could not gather information about %s (%s), skipping." % (fpath, e))
+                    continue
+
+            if options.check_size:
+                global_dict[file.lower()][size].append(root.lower())
             else:
                 global_dict[file.lower()].append(root.lower())
 
